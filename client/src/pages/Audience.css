@@ -1,0 +1,301 @@
+/* ============================================
+   Audience Page - Responsive Styles
+   Mobile-first approach
+   ============================================ */
+
+/* Override global body styles for audience page */
+html:has(.audience-container),
+html:has(.audience-container) body,
+html:has(.audience-container) #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  display: block;
+  background: #1a1a2e;
+}
+
+/* Base Container */
+.audience-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Header */
+.audience-header {
+  text-align: center;
+  padding: 16px 0;
+  flex-shrink: 0;
+}
+
+.audience-title {
+  color: #fff;
+  font-size: 32px;
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.audience-subtitle {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  margin: 8px 0 0 0;
+}
+
+.audience-disconnected {
+  background-color: #ef4444;
+  color: #fff;
+  padding: 8px 20px;
+  border-radius: 24px;
+  font-size: 13px;
+  display: inline-block;
+  margin-top: 12px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Main Content */
+.audience-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0;
+}
+
+/* Emoji Grid - Mobile (default) */
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  width: 100%;
+  max-width: 360px;
+}
+
+/* Emoji Button */
+.emoji-button {
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s ease, background-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.emoji-button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.emoji-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.emoji-button:hover::before {
+  opacity: 1;
+}
+
+.emoji-button:active,
+.emoji-button--active {
+  transform: scale(0.92);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.emoji-icon {
+  font-size: 36px;
+  line-height: 1;
+}
+
+/* Footer */
+.audience-footer {
+  text-align: center;
+  padding: 16px 0;
+  flex-shrink: 0;
+}
+
+.footer-text {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  display: inline-block;
+  animation: pulse 2s infinite;
+}
+
+.status-dot--connected {
+  background-color: #22c55e;
+  animation: none;
+}
+
+/* ============================================
+   Tablet (min-width: 600px)
+   ============================================ */
+@media (min-width: 600px) {
+  .audience-container {
+    padding: 24px;
+  }
+
+  .audience-header {
+    padding: 24px 0;
+  }
+
+  .audience-title {
+    font-size: 40px;
+  }
+
+  .audience-subtitle {
+    font-size: 16px;
+  }
+
+  .emoji-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    max-width: 450px;
+  }
+
+  .emoji-button {
+    border-radius: 20px;
+  }
+
+  .emoji-icon {
+    font-size: 44px;
+  }
+}
+
+/* ============================================
+   Desktop (min-width: 900px)
+   ============================================ */
+@media (min-width: 900px) {
+  .audience-container {
+    padding: 32px;
+  }
+
+  .audience-header {
+    padding: 24px 0;
+  }
+
+  .audience-title {
+    font-size: 48px;
+  }
+
+  .audience-subtitle {
+    font-size: 18px;
+    margin-top: 12px;
+  }
+
+  .emoji-grid {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 20px;
+    max-width: 700px;
+  }
+
+  .emoji-button {
+    border-radius: 24px;
+    transition: transform 0.15s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .emoji-button:hover {
+    background: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    transform: translateY(-2px);
+  }
+
+  .emoji-button:active,
+  .emoji-button--active {
+    transform: scale(0.95) translateY(0);
+  }
+
+  .emoji-icon {
+    font-size: 52px;
+  }
+
+  .footer-text {
+    font-size: 14px;
+  }
+}
+
+/* ============================================
+   Large Desktop (min-width: 1200px)
+   ============================================ */
+@media (min-width: 1200px) {
+  .emoji-grid {
+    gap: 24px;
+    max-width: 800px;
+  }
+
+  .emoji-icon {
+    font-size: 60px;
+  }
+}
+
+/* ============================================
+   Landscape Mobile (short height)
+   ============================================ */
+@media (max-height: 500px) {
+  .audience-header {
+    padding: 8px 0;
+  }
+
+  .audience-title {
+    font-size: 24px;
+  }
+
+  .audience-subtitle {
+    display: none;
+  }
+
+  .emoji-grid {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    max-width: 500px;
+  }
+
+  .emoji-icon {
+    font-size: 32px;
+  }
+
+  .audience-footer {
+    padding: 8px 0;
+  }
+}
