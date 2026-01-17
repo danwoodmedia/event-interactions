@@ -30,6 +30,24 @@ body {
   min-height: 100vh;
 }
 
+/* Display page - transparent mode */
+html:has(.display-page.display-transparent),
+html:has(.display-page.display-transparent) body,
+html:has(.display-page.display-transparent) #root {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.display-page.display-transparent {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Display page - chroma mode (no !important so JS can override) */
+.display-page.display-chroma {
+  /* Color set via inline style */
+}
+
 h1 {
   font-size: 3.2em;
   line-height: 1.1;
