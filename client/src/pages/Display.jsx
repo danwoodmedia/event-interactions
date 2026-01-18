@@ -16,6 +16,9 @@ function Display() {
   const [connected, setConnected] = useState(false)
   const [testEmojis, setTestEmojis] = useState([])
 
+  // Poll display state
+  const [displayPoll, setDisplayPoll] = useState(null)
+
   // Settings from A/V Tech panel
   const [emojiSize, setEmojiSize] = useState('medium') // small, medium, large
   const [animationSpeed, setAnimationSpeed] = useState('normal') // slow, normal, fast
@@ -116,11 +119,17 @@ function Display() {
       if (settings.spawnPosition) setSpawnPosition(settings.spawnPosition)
     })
 
+    // Listen for poll display updates
+    socket.on('poll:display', ({ poll }) => {
+      setDisplayPoll(poll)
+    })
+
     return () => {
       socket.off('connect')
       socket.off('disconnect')
       socket.off('reaction:display')
       socket.off('settings:sync')
+      socket.off('poll:display')
     }
   }, [displayId])
 
@@ -143,11 +152,21 @@ function Display() {
   }
 
   // Get X position based on spawn position setting
+  // For left/right, spawn from a tight uniform point near the edge
   const getXPosition = (position) => {
     switch (position) {
-      case 'left': return Math.random() * 30 + 5 // 5-35% from left
-      case 'right': return Math.random() * 30 + 65 // 65-95% from left
+      case 'left': return Math.random() * 5 + 2 // 2-7% from left (tight, near edge)
+      case 'right': return Math.random() * 5 + 93 // 93-98% from left (tight, near edge)
       default: return Math.random() * 80 + 10 // 10-90% from left (wide)
+    }
+  }
+
+  // Get horizontal drift for left/right spawn positions
+  const getHorizontalDrift = (position) => {
+    switch (position) {
+      case 'left': return 5 + Math.random() * 10 // Drift right 5-15vw (subtle)
+      case 'right': return -(5 + Math.random() * 10) // Drift left 5-15vw (subtle)
+      default: return (Math.random() - 0.5) * 6 // Slight random drift for wide
     }
   }
 
@@ -179,6 +198,7 @@ function Display() {
       emoji,
       x: getXPosition(position),
       direction,
+      horizontalDrift: getHorizontalDrift(position),
       size: baseSize * sizeMultiplier,
       duration: baseDuration * durationMultiplier,
       isSurge,
@@ -257,8 +277,163 @@ function Display() {
         </div>
       )}
 
+      {/* Poll overlay */}
+      {displayPoll && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          zIndex: 500,
+          animation: 'pollSlideIn 0.5s ease-out forwards'
+        }}>
+          <div style={{
+            background: 'rgba(15, 15, 26, 0.95)',
+            borderRadius: 24,
+            padding: '32px 40px',
+            minWidth: 500,
+            maxWidth: 700,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)',
+            backdropFilter: 'blur(20px)'
+          }}>
+            {/* Status indicator */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              marginBottom: 20
+            }}>
+              {displayPoll.status === 'live' && (
+                <>
+                  <span style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    background: '#22c55e',
+                    animation: 'pollPulse 1.5s infinite'
+                  }} />
+                  <span style={{ color: '#22c55e', fontSize: 14, fontWeight: 600 }}>
+                    VOTING OPEN
+                  </span>
+                </>
+              )}
+              {displayPoll.status === 'closed' && (
+                <span style={{ color: '#6b7280', fontSize: 14, fontWeight: 600 }}>
+                  VOTING CLOSED
+                </span>
+              )}
+            </div>
+
+            {/* Question */}
+            <h2 style={{
+              color: '#fff',
+              fontSize: 28,
+              fontWeight: 700,
+              textAlign: 'center',
+              margin: '0 0 24px 0',
+              lineHeight: 1.3
+            }}>
+              {displayPoll.question}
+            </h2>
+
+            {/* Options */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {displayPoll.options.map((option, index) => {
+                const votes = displayPoll.results?.voteCounts?.[option.id] || 0
+                const total = displayPoll.results?.totalVotes || 0
+                const percentage = total > 0 ? Math.round((votes / total) * 100) : 0
+
+                return (
+                  <div
+                    key={option.id}
+                    style={{
+                      position: 'relative',
+                      background: 'rgba(255,255,255,0.08)',
+                      borderRadius: 12,
+                      padding: '16px 20px',
+                      overflow: 'hidden',
+                      animation: `pollOptionFadeIn 0.4s ease-out ${index * 0.1}s both`
+                    }}
+                  >
+                    {/* Result bar (behind text) */}
+                    {displayPoll.showResults && (
+                      <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        bottom: 0,
+                        width: `${percentage}%`,
+                        background: 'linear-gradient(90deg, rgba(165,180,252,0.3) 0%, rgba(165,180,252,0.15) 100%)',
+                        borderRadius: 12,
+                        transition: 'width 0.8s ease-out',
+                        animation: 'pollBarGrow 0.8s ease-out'
+                      }} />
+                    )}
+
+                    {/* Content */}
+                    <div style={{
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 14
+                    }}>
+                      <span style={{
+                        width: 32,
+                        height: 32,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'rgba(165,180,252,0.2)',
+                        borderRadius: 8,
+                        fontSize: 16,
+                        fontWeight: 700,
+                        color: '#a5b4fc'
+                      }}>
+                        {String.fromCharCode(65 + index)}
+                      </span>
+                      <span style={{
+                        flex: 1,
+                        fontSize: 18,
+                        color: '#fff',
+                        fontWeight: 500
+                      }}>
+                        {option.text}
+                      </span>
+                      {displayPoll.showResults && (
+                        <span style={{
+                          fontSize: 20,
+                          fontWeight: 700,
+                          color: '#a5b4fc',
+                          minWidth: 60,
+                          textAlign: 'right'
+                        }}>
+                          {percentage}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Total votes */}
+            {displayPoll.showResults && (
+              <div style={{
+                textAlign: 'center',
+                marginTop: 20,
+                fontSize: 14,
+                color: 'rgba(255,255,255,0.5)'
+              }}>
+                {displayPoll.results?.totalVotes || 0} total votes
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Emoji layer */}
-      {testEmojis.map(({ id, emoji, x, size, duration, isSurge, direction, particles }) => (
+      {testEmojis.map(({ id, emoji, x, size, duration, isSurge, direction, particles, horizontalDrift }) => (
         <div
           key={id}
           style={{
@@ -268,7 +443,8 @@ function Display() {
             fontSize: size,
             animation: `${isSurge ? (direction === 'top-down' ? 'floatDownSurge' : 'floatUpSurge') : (direction === 'top-down' ? 'floatDown' : 'floatUp')} ${duration}s ease-out forwards`,
             pointerEvents: 'none',
-            zIndex: 1000
+            zIndex: 1000,
+            '--horizontal-drift': `${horizontalDrift}vw`
           }}
         >
           {emoji}
@@ -300,67 +476,67 @@ function Display() {
       <style>{`
         @keyframes floatUp {
           0% {
-            transform: translateY(0) scale(1);
+            transform: translateY(0) translateX(0) scale(1);
             opacity: 1;
           }
           70% {
             opacity: 1;
           }
           100% {
-            transform: translateY(-100vh) scale(1.2);
+            transform: translateY(-100vh) translateX(var(--horizontal-drift, 0)) scale(1.2);
             opacity: 0;
           }
         }
         @keyframes floatUpSurge {
           0% {
-            transform: translateY(0) scale(1) rotate(0deg);
+            transform: translateY(0) translateX(0) scale(1) rotate(0deg);
             opacity: 1;
           }
           25% {
-            transform: translateY(-25vh) scale(1.3) rotate(-10deg);
+            transform: translateY(-25vh) translateX(calc(var(--horizontal-drift, 0) * 0.25)) scale(1.3) rotate(-10deg);
           }
           50% {
-            transform: translateY(-50vh) scale(1.5) rotate(10deg);
+            transform: translateY(-50vh) translateX(calc(var(--horizontal-drift, 0) * 0.5)) scale(1.5) rotate(10deg);
             opacity: 1;
           }
           75% {
-            transform: translateY(-75vh) scale(1.3) rotate(-5deg);
+            transform: translateY(-75vh) translateX(calc(var(--horizontal-drift, 0) * 0.75)) scale(1.3) rotate(-5deg);
           }
           100% {
-            transform: translateY(-100vh) scale(1.8) rotate(0deg);
+            transform: translateY(-100vh) translateX(var(--horizontal-drift, 0)) scale(1.8) rotate(0deg);
             opacity: 0;
           }
         }
         @keyframes floatDown {
           0% {
-            transform: translateY(0) scale(1);
+            transform: translateY(0) translateX(0) scale(1);
             opacity: 1;
           }
           70% {
             opacity: 1;
           }
           100% {
-            transform: translateY(100vh) scale(1.2);
+            transform: translateY(100vh) translateX(var(--horizontal-drift, 0)) scale(1.2);
             opacity: 0;
           }
         }
         @keyframes floatDownSurge {
           0% {
-            transform: translateY(0) scale(1) rotate(0deg);
+            transform: translateY(0) translateX(0) scale(1) rotate(0deg);
             opacity: 1;
           }
           25% {
-            transform: translateY(25vh) scale(1.3) rotate(-10deg);
+            transform: translateY(25vh) translateX(calc(var(--horizontal-drift, 0) * 0.25)) scale(1.3) rotate(-10deg);
           }
           50% {
-            transform: translateY(50vh) scale(1.5) rotate(10deg);
+            transform: translateY(50vh) translateX(calc(var(--horizontal-drift, 0) * 0.5)) scale(1.5) rotate(10deg);
             opacity: 1;
           }
           75% {
-            transform: translateY(75vh) scale(1.3) rotate(-5deg);
+            transform: translateY(75vh) translateX(calc(var(--horizontal-drift, 0) * 0.75)) scale(1.3) rotate(-5deg);
           }
           100% {
-            transform: translateY(100vh) scale(1.8) rotate(0deg);
+            transform: translateY(100vh) translateX(var(--horizontal-drift, 0)) scale(1.8) rotate(0deg);
             opacity: 0;
           }
         }
@@ -375,6 +551,44 @@ function Display() {
           100% {
             opacity: 0;
             transform: translate(-50%, -50%) rotate(var(--particle-angle)) translateX(var(--particle-distance)) scale(0.3);
+          }
+        }
+        @keyframes pollSlideIn {
+          0% {
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.9);
+          }
+          100% {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+          }
+        }
+        @keyframes pollOptionFadeIn {
+          0% {
+            opacity: 0;
+            transform: translateX(-20px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        @keyframes pollBarGrow {
+          0% {
+            transform: scaleX(0);
+            transform-origin: left;
+          }
+          100% {
+            transform: scaleX(1);
+            transform-origin: left;
+          }
+        }
+        @keyframes pollPulse {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.5;
           }
         }
       `}</style>

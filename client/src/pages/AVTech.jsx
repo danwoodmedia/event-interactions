@@ -19,6 +19,13 @@ function AVTech() {
   const [spawnDirection, setSpawnDirection] = useState('bottom-up') // bottom-up, top-down
   const [spawnPosition, setSpawnPosition] = useState('wide') // left, right, wide
 
+  // UI state
+  const [emojiSettingsOpen, setEmojiSettingsOpen] = useState(false)
+  const [pollControlOpen, setPollControlOpen] = useState(true)
+
+  // Polls state
+  const [polls, setPolls] = useState([])
+
   // Stats
   const [stats, setStats] = useState({
     totalReactions: 0,
@@ -52,11 +59,25 @@ function AVTech() {
       if (data.spawnPosition !== undefined) setSpawnPosition(data.spawnPosition)
     })
 
+    // Listen for poll sync
+    socket.on('poll:sync', (pollsData) => {
+      setPolls(pollsData)
+    })
+
+    // Listen for poll results updates
+    socket.on('poll:results', ({ pollId, results }) => {
+      setPolls(prev => prev.map(poll =>
+        poll.id === pollId ? { ...poll, results } : poll
+      ))
+    })
+
     return () => {
       socket.off('connect')
       socket.off('disconnect')
       socket.off('stats:update')
       socket.off('settings:sync')
+      socket.off('poll:sync')
+      socket.off('poll:results')
     }
   }, [eventId])
 
@@ -113,6 +134,33 @@ function AVTech() {
     socket.emit('reaction:test-surge', { eventId, emoji: randomEmoji })
   }
 
+  // Poll control functions
+  const sendPollToDisplay = (pollId) => {
+    socket.emit('poll:send-to-display', { eventId, pollId })
+  }
+
+  const toggleShowResults = (pollId, currentShow) => {
+    socket.emit('poll:show-results', { eventId, pollId, show: !currentShow })
+  }
+
+  const closePoll = (pollId) => {
+    socket.emit('poll:close', { eventId, pollId })
+  }
+
+  const hidePollFromDisplay = (pollId) => {
+    socket.emit('poll:hide', { eventId, pollId })
+  }
+
+  // Get status badge color
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'ready': return '#3b82f6'
+      case 'live': return '#22c55e'
+      case 'closed': return '#6b7280'
+      default: return '#6b7280'
+    }
+  }
+
   return (
     <div className="avtech-container">
       <header className="avtech-header">
@@ -165,90 +213,191 @@ function AVTech() {
           </div>
         </section>
 
-        {/* Display Settings */}
+        {/* Emoji Settings - Collapsible */}
         <section className="avtech-section">
-          <h2 className="section-title">Display Settings</h2>
+          <button
+            className="section-header-btn"
+            onClick={() => setEmojiSettingsOpen(!emojiSettingsOpen)}
+          >
+            <h2 className="section-title">Emoji Settings</h2>
+            <span className={`section-chevron ${emojiSettingsOpen ? 'open' : ''}`}>
+              ▼
+            </span>
+          </button>
 
-          <div className="setting-row">
-            <label className="setting-label">Max Emojis on Screen</label>
-            <div className="setting-control">
-              <input
-                type="range"
-                min="5"
-                max="50"
-                value={maxOnScreen}
-                onChange={(e) => handleMaxOnScreenChange(Number(e.target.value))}
-                className="range-input"
-              />
-              <span className="range-value">{maxOnScreen}</span>
+          <div className={`collapsible-content ${emojiSettingsOpen ? 'open' : ''}`}>
+            <div className="setting-row">
+              <label className="setting-label">Max Emojis on Screen</label>
+              <div className="setting-control">
+                <input
+                  type="range"
+                  min="5"
+                  max="50"
+                  value={maxOnScreen}
+                  onChange={(e) => handleMaxOnScreenChange(Number(e.target.value))}
+                  className="range-input"
+                />
+                <span className="range-value">{maxOnScreen}</span>
+              </div>
+            </div>
+
+            <div className="setting-row">
+              <label className="setting-label">Emoji Size</label>
+              <div className="setting-control button-group">
+                {['small', 'medium', 'large'].map((size) => (
+                  <button
+                    key={size}
+                    className={`size-btn ${emojiSize === size ? 'active' : ''}`}
+                    onClick={() => handleEmojiSizeChange(size)}
+                  >
+                    {size.charAt(0).toUpperCase() + size.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="setting-row">
+              <label className="setting-label">Animation Speed</label>
+              <div className="setting-control button-group">
+                {['slow', 'normal', 'fast'].map((speed) => (
+                  <button
+                    key={speed}
+                    className={`size-btn ${animationSpeed === speed ? 'active' : ''}`}
+                    onClick={() => handleAnimationSpeedChange(speed)}
+                  >
+                    {speed.charAt(0).toUpperCase() + speed.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="setting-row">
+              <label className="setting-label">Spawn Direction</label>
+              <div className="setting-control button-group">
+                {[
+                  { value: 'bottom-up', label: '⬆️ Bottom Up' },
+                  { value: 'top-down', label: '⬇️ Top Down' }
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    className={`size-btn ${spawnDirection === option.value ? 'active' : ''}`}
+                    onClick={() => handleSpawnDirectionChange(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="setting-row">
+              <label className="setting-label">Spawn Position</label>
+              <div className="setting-control button-group">
+                {[
+                  { value: 'left', label: '◀️ Left' },
+                  { value: 'wide', label: '↔️ Wide' },
+                  { value: 'right', label: '▶️ Right' }
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    className={`size-btn ${spawnPosition === option.value ? 'active' : ''}`}
+                    onClick={() => handleSpawnPositionChange(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+        </section>
 
-          <div className="setting-row">
-            <label className="setting-label">Emoji Size</label>
-            <div className="setting-control button-group">
-              {['small', 'medium', 'large'].map((size) => (
-                <button
-                  key={size}
-                  className={`size-btn ${emojiSize === size ? 'active' : ''}`}
-                  onClick={() => handleEmojiSizeChange(size)}
-                >
-                  {size.charAt(0).toUpperCase() + size.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
+        {/* Poll Control - Collapsible */}
+        <section className="avtech-section">
+          <button
+            className="section-header-btn"
+            onClick={() => setPollControlOpen(!pollControlOpen)}
+          >
+            <h2 className="section-title">Poll Control</h2>
+            <span className={`section-chevron ${pollControlOpen ? 'open' : ''}`}>
+              ▼
+            </span>
+          </button>
 
-          <div className="setting-row">
-            <label className="setting-label">Animation Speed</label>
-            <div className="setting-control button-group">
-              {['slow', 'normal', 'fast'].map((speed) => (
-                <button
-                  key={speed}
-                  className={`size-btn ${animationSpeed === speed ? 'active' : ''}`}
-                  onClick={() => handleAnimationSpeedChange(speed)}
-                >
-                  {speed.charAt(0).toUpperCase() + speed.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
+          <div className={`collapsible-content ${pollControlOpen ? 'open' : ''}`}>
+            {polls.length === 0 ? (
+              <p className="no-polls-message">No polls available. Create polls in the Producer panel.</p>
+            ) : (
+              <div className="poll-control-list">
+                {polls.map(poll => (
+                  <div key={poll.id} className="poll-control-card">
+                    <div className="poll-control-header">
+                      <span
+                        className="poll-status-badge"
+                        style={{ backgroundColor: getStatusColor(poll.status) }}
+                      >
+                        {poll.status.toUpperCase()}
+                      </span>
+                      <span className="poll-question-preview">{poll.question}</span>
+                    </div>
 
-          <div className="setting-row">
-            <label className="setting-label">Spawn Direction</label>
-            <div className="setting-control button-group">
-              {[
-                { value: 'bottom-up', label: '⬆️ Bottom Up' },
-                { value: 'top-down', label: '⬇️ Top Down' }
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  className={`size-btn ${spawnDirection === option.value ? 'active' : ''}`}
-                  onClick={() => handleSpawnDirectionChange(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
+                    {/* Show vote count for live/closed polls */}
+                    {poll.status !== 'ready' && (
+                      <div className="poll-vote-count">
+                        {poll.results?.totalVotes || 0} votes
+                        {poll.showOnDisplay && <span className="on-display-badge">ON DISPLAY</span>}
+                      </div>
+                    )}
 
-          <div className="setting-row">
-            <label className="setting-label">Spawn Position</label>
-            <div className="setting-control button-group">
-              {[
-                { value: 'left', label: '◀️ Left' },
-                { value: 'wide', label: '↔️ Wide' },
-                { value: 'right', label: '▶️ Right' }
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  className={`size-btn ${spawnPosition === option.value ? 'active' : ''}`}
-                  onClick={() => handleSpawnPositionChange(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
+                    <div className="poll-control-actions">
+                      {poll.status === 'ready' && (
+                        <button
+                          className="poll-ctrl-btn primary"
+                          onClick={() => sendPollToDisplay(poll.id)}
+                        >
+                          📺 Send to Display
+                        </button>
+                      )}
+
+                      {poll.status === 'live' && (
+                        <>
+                          <button
+                            className={`poll-ctrl-btn ${poll.showResults ? 'active' : 'secondary'}`}
+                            onClick={() => toggleShowResults(poll.id, poll.showResults)}
+                          >
+                            {poll.showResults ? '📊 Hide Results' : '📊 Show Results'}
+                          </button>
+                          <button
+                            className="poll-ctrl-btn warning"
+                            onClick={() => closePoll(poll.id)}
+                          >
+                            ⏹️ Close Voting
+                          </button>
+                        </>
+                      )}
+
+                      {poll.status === 'closed' && (
+                        <>
+                          <button
+                            className={`poll-ctrl-btn ${poll.showResults ? 'active' : 'secondary'}`}
+                            onClick={() => toggleShowResults(poll.id, poll.showResults)}
+                          >
+                            {poll.showResults ? '📊 Hide Results' : '📊 Show Results'}
+                          </button>
+                        </>
+                      )}
+
+                      {poll.showOnDisplay && (
+                        <button
+                          className="poll-ctrl-btn danger"
+                          onClick={() => hidePollFromDisplay(poll.id)}
+                        >
+                          🚫 Hide from Display
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 

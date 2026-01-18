@@ -6,6 +6,7 @@ import App from './App.jsx'
 import Display from './pages/Display.jsx'
 import Audience from './pages/Audience.jsx'
 import AVTech from './pages/AVTech.jsx'
+import Producer from './pages/Producer.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -18,6 +19,8 @@ createRoot(document.getElementById('root')).render(
         <Route path="/audience/:eventId" element={<Audience />} />
         <Route path="/avtech" element={<AVTech />} />
         <Route path="/avtech/:eventId" element={<AVTech />} />
+        <Route path="/producer" element={<Producer />} />
+        <Route path="/producer/:eventId" element={<Producer />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

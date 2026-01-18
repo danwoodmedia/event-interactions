@@ -87,15 +87,48 @@
    - Transparent mode working (tested in vMix)
    - Chroma key mode working (green/custom color)
    - Test emoji animations (click to spawn)
-   - URL parameters: `mode`, `chroma`, `hideUI`
+   - URL parameters: `mode`, `chroma`, `hideUI`, `eventId`
+   - Poll overlay with animated results bars
    - File: `/client/src/pages/Display.jsx`
+
+9. **Emoji Reactions**
+   - Audience page with emoji grid (`/audience/:eventId`)
+   - Server-side queue system with rate limiting
+   - Surge detection (20+ same emoji = special animation)
+   - Display animations with spawn direction/position options
+   - A/V Tech controls for emoji settings
+
+10. **A/V Tech Panel**
+    - Route at `/avtech/:eventId`
+    - Live stats (reactions, queue, displays)
+    - Quick actions (pause emojis, clear queue, test)
+    - Collapsible emoji settings (size, speed, direction, position)
+    - Poll control (send to display, show results, close, hide)
+    - Display URLs for easy copy
+    - File: `/client/src/pages/AVTech.jsx`
+
+11. **Producer Panel**
+    - Route at `/producer/:eventId`
+    - Poll creation form (question, 2-6 options, timer, allow change)
+    - Poll management (view status, results, delete)
+    - Live stats display
+    - Quick links to other panels
+    - File: `/client/src/pages/Producer.jsx`
+
+12. **Polls Feature**
+    - Producer creates polls (status: ready)
+    - A/V Tech sends poll to display (status: live)
+    - Audience votes with smooth slide-in animation
+    - Real-time results broadcast
+    - A/V Tech can show/hide results on display
+    - Optional auto-close timer
+    - Animated result bars on display
 
 ### Not Started Yet ❌
 
-- Audience page
-- Producer panel
-- A/V Tech panel
-- Any widgets (emoji, polls, Q&A, etc.)
+- Q&A feature
+- Admin panel
+- Database persistence for polls (currently in-memory)
 
 ---
 
@@ -154,17 +187,21 @@ Owner → Admin → Producer / A/V Tech → Audience
 
 2. ~~**Create Display Page**~~ ✅ DONE
 
-3. **Build Emoji Reactions**
+3. ~~**Build Emoji Reactions**~~ ✅ DONE
    - Audience UI (emoji grid)
    - Server queue system
    - Display animations
    - A/V tech controls
 
-4. **Add Polls**
+4. ~~**Add Polls**~~ ✅ DONE
+   - Producer creates polls
+   - A/V Tech controls display
+   - Audience votes
+   - Animated results on display
 
 5. **Add Q&A**
 
-6. **Build Control Panels**
+6. **Build Admin Panel**
 
 ---
 
@@ -175,7 +212,15 @@ C:\Projects\event-interactions\
 ├── client\
 │   ├── src\
 │   │   ├── App.jsx              # Main React component
-│   │   ├── main.jsx             # Entry point
+│   │   ├── main.jsx             # Entry point with routes
+│   │   ├── pages\
+│   │   │   ├── Display.jsx      # Broadcast overlay output
+│   │   │   ├── Audience.jsx     # Audience participation page
+│   │   │   ├── Audience.css
+│   │   │   ├── AVTech.jsx       # A/V Tech control panel
+│   │   │   ├── AVTech.css
+│   │   │   ├── Producer.jsx     # Producer content panel
+│   │   │   └── Producer.css
 │   │   └── lib\
 │   │       ├── supabase.js      # Supabase client
 │   │       └── auth.js          # Auth helper functions
@@ -183,16 +228,26 @@ C:\Projects\event-interactions\
 │   ├── package.json
 │   └── vite.config.js
 ├── server\
-│   ├── index.js                 # Server entry point
+│   ├── index.js                 # Server entry point (emoji queue, poll handlers)
 │   ├── lib\
 │   │   └── supabase.js          # Supabase client (service role)
 │   ├── .env                     # Server env vars (SUPABASE_*)
 │   └── package.json
 ├── docs\
 │   ├── PRD.md                   # Full product requirements
+│   ├── DEVELOPMENT-CONTEXT.md   # This file
 │   └── supabase-schema.sql      # Database schema
 └── .gitignore
 ```
+
+## URL Reference
+
+| URL | Purpose |
+|-----|---------|
+| `/producer/:eventId` | Producer content panel (create polls) |
+| `/avtech/:eventId` | A/V Tech display settings (send polls, emoji settings) |
+| `/audience/:eventId` | Audience participation page (vote, send emojis) |
+| `/display?eventId=X` | Broadcast overlay output (transparent/chroma) |
 
 ---
 

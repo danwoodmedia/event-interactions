@@ -54,6 +54,19 @@ const eventSettings = new Map();
 // Stats tracking: Map<eventId, stats>
 const eventStats = new Map();
 
+// ============================================
+// Poll System State
+// ============================================
+
+// Polls for each event: Map<eventId, Map<pollId, pollData>>
+const eventPolls = new Map();
+
+// Votes for each poll: Map<pollId, Map<sessionId, optionId>>
+const pollVotes = new Map();
+
+// Timers for auto-closing polls: Map<pollId, timerId>
+const pollTimers = new Map();
+
 // Get or create event settings
 function getEventSettings(eventId) {
   if (!eventSettings.has(eventId)) {
@@ -90,8 +103,118 @@ function updateStats(eventId) {
   stats.queueLength = queue.length;
   stats.activeDisplays = displays.size;
 
-  // Broadcast to A/V tech panel
+  // Broadcast to A/V tech panel and producer
   io.to(`event:${eventId}:avtech`).emit('stats:update', stats);
+  io.to(`event:${eventId}:producer`).emit('stats:update', stats);
+}
+
+// ============================================
+// Poll Helper Functions
+// ============================================
+
+// Get or create polls map for an event
+function getEventPolls(eventId) {
+  if (!eventPolls.has(eventId)) {
+    eventPolls.set(eventId, new Map());
+  }
+  return eventPolls.get(eventId);
+}
+
+// Generate unique poll ID
+function generatePollId() {
+  return `poll_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Generate unique option ID
+function generateOptionId() {
+  return `opt_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Calculate poll results
+function calculatePollResults(pollId) {
+  const votes = pollVotes.get(pollId) || new Map();
+  const voteCounts = new Map();
+
+  // Count votes per option
+  votes.forEach((optionId) => {
+    voteCounts.set(optionId, (voteCounts.get(optionId) || 0) + 1);
+  });
+
+  const totalVotes = votes.size;
+
+  return {
+    pollId,
+    totalVotes,
+    voteCounts: Object.fromEntries(voteCounts)
+  };
+}
+
+// Broadcast poll state to producer and A/V tech
+function broadcastPollSync(eventId) {
+  const polls = getEventPolls(eventId);
+  const pollsArray = Array.from(polls.values());
+
+  // Calculate results for each poll
+  const pollsWithResults = pollsArray.map(poll => ({
+    ...poll,
+    results: calculatePollResults(poll.id)
+  }));
+
+  io.to(`event:${eventId}:producer`).emit('poll:sync', pollsWithResults);
+  io.to(`event:${eventId}:avtech`).emit('poll:sync', pollsWithResults);
+}
+
+// Broadcast poll to audience
+function broadcastPollToAudience(eventId, poll) {
+  if (poll.status === 'live') {
+    io.to(`event:${eventId}:audience`).emit('poll:active', {
+      id: poll.id,
+      question: poll.question,
+      options: poll.options,
+      allowChange: poll.allowChange
+    });
+  } else if (poll.status === 'closed') {
+    io.to(`event:${eventId}:audience`).emit('poll:closed', { pollId: poll.id });
+  }
+}
+
+// Broadcast poll to display
+function broadcastPollToDisplay(eventId, poll) {
+  const results = calculatePollResults(poll.id);
+  io.to(`event:${eventId}:display`).emit('poll:display', {
+    poll: poll.showOnDisplay ? {
+      id: poll.id,
+      question: poll.question,
+      options: poll.options,
+      status: poll.status,
+      showResults: poll.showResults,
+      results: results
+    } : null
+  });
+}
+
+// Close a poll (called by timer or manually)
+function closePoll(eventId, pollId) {
+  const polls = getEventPolls(eventId);
+  const poll = polls.get(pollId);
+
+  if (poll && poll.status === 'live') {
+    poll.status = 'closed';
+    poll.closedAt = Date.now();
+
+    // Clear timer if exists
+    if (pollTimers.has(pollId)) {
+      clearTimeout(pollTimers.get(pollId));
+      pollTimers.delete(pollId);
+    }
+
+    // Broadcast updates
+    broadcastPollSync(eventId);
+    broadcastPollToAudience(eventId, poll);
+    broadcastPollToDisplay(eventId, poll);
+
+    console.log(`Poll closed: ${pollId} for event ${eventId}`);
+  }
 }
 
 // Health check endpoint
@@ -257,14 +380,70 @@ io.on('connection', (socket) => {
     // Join socket room
     socket.join(`event:${eventId}:display`);
 
+    // Send current settings to the display
+    const settings = getEventSettings(eventId);
+    socket.emit('settings:sync', settings);
+
+    // Send current poll state to display
+    const polls = getEventPolls(eventId);
+    const visiblePoll = Array.from(polls.values()).find(p => p.showOnDisplay);
+    if (visiblePoll) {
+      const results = calculatePollResults(visiblePoll.id);
+      socket.emit('poll:display', {
+        poll: {
+          id: visiblePoll.id,
+          question: visiblePoll.question,
+          options: visiblePoll.options,
+          status: visiblePoll.status,
+          showResults: visiblePoll.showResults,
+          results: results
+        }
+      });
+    }
+
     // Start queue processor if needed
     startQueueProcessor(eventId);
+
+    // Update stats (display count changed)
+    updateStats(eventId);
   });
 
   // Audience joins an event
   socket.on('join-event', ({ eventId = 'default', role }) => {
     console.log(`${role} ${socket.id} joining event ${eventId}`);
     socket.join(`event:${eventId}:${role}`);
+
+    // Send current settings to A/V tech panels when they join
+    if (role === 'avtech') {
+      const settings = getEventSettings(eventId);
+      socket.emit('settings:sync', settings);
+
+      // Send current polls
+      broadcastPollSync(eventId);
+
+      // Also send current stats
+      updateStats(eventId);
+    }
+
+    // Send current polls to producer when they join
+    if (role === 'producer') {
+      broadcastPollSync(eventId);
+      updateStats(eventId);
+    }
+
+    // Send active poll to audience when they join
+    if (role === 'audience') {
+      const polls = getEventPolls(eventId);
+      const livePoll = Array.from(polls.values()).find(p => p.status === 'live');
+      if (livePoll) {
+        socket.emit('poll:active', {
+          id: livePoll.id,
+          question: livePoll.question,
+          options: livePoll.options,
+          allowChange: livePoll.allowChange
+        });
+      }
+    }
   });
 
   // Audience sends a reaction
@@ -353,6 +532,199 @@ io.on('connection', (socket) => {
   socket.on('test', (data) => {
     console.log('Received test event:', data);
     socket.emit('test-response', { received: data, serverTime: new Date().toISOString() });
+  });
+
+  // ============================================
+  // Poll Socket Events
+  // ============================================
+
+  // Producer creates a new poll
+  socket.on('poll:create', ({ eventId = 'default', question, options, allowChange = false, durationSeconds = null }) => {
+    const polls = getEventPolls(eventId);
+    const pollId = generatePollId();
+
+    // Create options with IDs
+    const pollOptions = options.map((text, index) => ({
+      id: generateOptionId(),
+      text,
+      sortOrder: index
+    }));
+
+    const poll = {
+      id: pollId,
+      eventId,
+      question,
+      options: pollOptions,
+      status: 'ready',
+      allowChange,
+      showResults: false,
+      showOnDisplay: false,
+      durationSeconds,
+      createdAt: Date.now(),
+      openedAt: null,
+      closedAt: null
+    };
+
+    polls.set(pollId, poll);
+    pollVotes.set(pollId, new Map());
+
+    // Sync to producer and A/V tech
+    broadcastPollSync(eventId);
+
+    console.log(`Poll created: ${pollId} for event ${eventId}`);
+  });
+
+  // Producer updates a poll (only when status is 'ready')
+  socket.on('poll:update', ({ eventId = 'default', pollId, question, options, allowChange, durationSeconds }) => {
+    const polls = getEventPolls(eventId);
+    const poll = polls.get(pollId);
+
+    if (poll && poll.status === 'ready') {
+      if (question !== undefined) poll.question = question;
+      if (allowChange !== undefined) poll.allowChange = allowChange;
+      if (durationSeconds !== undefined) poll.durationSeconds = durationSeconds;
+
+      if (options !== undefined) {
+        poll.options = options.map((text, index) => ({
+          id: generateOptionId(),
+          text,
+          sortOrder: index
+        }));
+        // Clear any existing votes since options changed
+        pollVotes.set(pollId, new Map());
+      }
+
+      broadcastPollSync(eventId);
+      console.log(`Poll updated: ${pollId} for event ${eventId}`);
+    }
+  });
+
+  // Producer deletes a poll (only when status is 'ready')
+  socket.on('poll:delete', ({ eventId = 'default', pollId }) => {
+    const polls = getEventPolls(eventId);
+    const poll = polls.get(pollId);
+
+    if (poll && poll.status === 'ready') {
+      polls.delete(pollId);
+      pollVotes.delete(pollId);
+
+      broadcastPollSync(eventId);
+      console.log(`Poll deleted: ${pollId} for event ${eventId}`);
+    }
+  });
+
+  // A/V Tech sends poll to display (opens voting)
+  socket.on('poll:send-to-display', ({ eventId = 'default', pollId }) => {
+    const polls = getEventPolls(eventId);
+    const poll = polls.get(pollId);
+
+    if (poll && poll.status === 'ready') {
+      // Check if another poll is already live
+      const hasLivePoll = Array.from(polls.values()).some(p => p.status === 'live');
+      if (hasLivePoll) {
+        socket.emit('poll:error', { message: 'Another poll is already live' });
+        return;
+      }
+
+      poll.status = 'live';
+      poll.showOnDisplay = true;
+      poll.openedAt = Date.now();
+
+      // Set up auto-close timer if duration specified
+      if (poll.durationSeconds) {
+        const timerId = setTimeout(() => {
+          closePoll(eventId, pollId);
+        }, poll.durationSeconds * 1000);
+        pollTimers.set(pollId, timerId);
+      }
+
+      // Broadcast to all
+      broadcastPollSync(eventId);
+      broadcastPollToAudience(eventId, poll);
+      broadcastPollToDisplay(eventId, poll);
+
+      console.log(`Poll sent to display: ${pollId} for event ${eventId}`);
+    }
+  });
+
+  // A/V Tech toggles showing results on display
+  socket.on('poll:show-results', ({ eventId = 'default', pollId, show }) => {
+    const polls = getEventPolls(eventId);
+    const poll = polls.get(pollId);
+
+    if (poll && (poll.status === 'live' || poll.status === 'closed')) {
+      poll.showResults = show;
+
+      broadcastPollSync(eventId);
+      broadcastPollToDisplay(eventId, poll);
+
+      console.log(`Poll results ${show ? 'shown' : 'hidden'}: ${pollId} for event ${eventId}`);
+    }
+  });
+
+  // A/V Tech closes voting on a poll
+  socket.on('poll:close', ({ eventId = 'default', pollId }) => {
+    closePoll(eventId, pollId);
+  });
+
+  // A/V Tech hides poll from display
+  socket.on('poll:hide', ({ eventId = 'default', pollId }) => {
+    const polls = getEventPolls(eventId);
+    const poll = polls.get(pollId);
+
+    if (poll) {
+      poll.showOnDisplay = false;
+
+      broadcastPollSync(eventId);
+      broadcastPollToDisplay(eventId, poll);
+
+      console.log(`Poll hidden from display: ${pollId} for event ${eventId}`);
+    }
+  });
+
+  // Audience votes on a poll
+  socket.on('poll:vote', ({ eventId = 'default', pollId, optionId }) => {
+    const polls = getEventPolls(eventId);
+    const poll = polls.get(pollId);
+
+    if (!poll || poll.status !== 'live') {
+      socket.emit('poll:vote-error', { message: 'Poll is not active' });
+      return;
+    }
+
+    // Check if option exists
+    const optionExists = poll.options.some(opt => opt.id === optionId);
+    if (!optionExists) {
+      socket.emit('poll:vote-error', { message: 'Invalid option' });
+      return;
+    }
+
+    const votes = pollVotes.get(pollId);
+    const existingVote = votes.get(socket.id);
+
+    // Check if changing vote is allowed
+    if (existingVote && !poll.allowChange) {
+      socket.emit('poll:vote-error', { message: 'Vote already submitted' });
+      return;
+    }
+
+    // Record vote
+    votes.set(socket.id, optionId);
+
+    // Confirm to voter
+    socket.emit('poll:vote-confirmed', { pollId, optionId });
+
+    // Broadcast updated results
+    const results = calculatePollResults(pollId);
+    io.to(`event:${eventId}:avtech`).emit('poll:results', { pollId, results });
+    io.to(`event:${eventId}:producer`).emit('poll:results', { pollId, results });
+
+    // If showing results on display, update display too
+    if (poll.showResults) {
+      broadcastPollToDisplay(eventId, poll);
+    }
+
+    console.log(`Vote recorded: ${optionId} for poll ${pollId} from ${socket.id}`);
   });
 });
 
