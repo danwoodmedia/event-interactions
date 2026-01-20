@@ -19,11 +19,21 @@ function Display() {
   // Poll display state
   const [displayPoll, setDisplayPoll] = useState(null)
 
+  // Q&A display state
+  const [featuredQuestion, setFeaturedQuestion] = useState(null)
+
+  // Timer display state (supports up to 3 simultaneous timers)
+  const [displayTimers, setDisplayTimers] = useState([])
+
   // Settings from A/V Tech panel
   const [emojiSize, setEmojiSize] = useState('medium') // small, medium, large
   const [animationSpeed, setAnimationSpeed] = useState('normal') // slow, normal, fast
   const [spawnDirection, setSpawnDirection] = useState('bottom-up') // bottom-up, top-down
   const [spawnPosition, setSpawnPosition] = useState('wide') // left, right, wide
+  const [pollPosition, setPollPosition] = useState('center') // center, lower-third, etc.
+  const [pollSize, setPollSize] = useState('medium') // small, medium, large
+  const [qaPosition, setQaPosition] = useState('lower-third')
+  const [qaSize, setQaSize] = useState('medium')
 
   // Refs to hold current settings values (avoids stale closure issue)
   const emojiSizeRef = useRef(emojiSize)
@@ -113,15 +123,45 @@ function Display() {
 
     // Listen for settings updates from A/V Tech panel
     socket.on('settings:sync', (settings) => {
+      console.log('[Display] Received settings:sync:', settings)
       if (settings.emojiSize) setEmojiSize(settings.emojiSize)
       if (settings.animationSpeed) setAnimationSpeed(settings.animationSpeed)
       if (settings.spawnDirection) setSpawnDirection(settings.spawnDirection)
       if (settings.spawnPosition) setSpawnPosition(settings.spawnPosition)
+      if (settings.pollPosition) setPollPosition(settings.pollPosition)
+      if (settings.pollSize) setPollSize(settings.pollSize)
+      if (settings.qaPosition) setQaPosition(settings.qaPosition)
+      if (settings.qaSize) setQaSize(settings.qaSize)
+      if (settings.timerPosition) setTimerPosition(settings.timerPosition)
+      if (settings.timerSize) setTimerSize(settings.timerSize)
+      if (settings.timerStyle) {
+        console.log('[Display] Updating timerStyle to:', settings.timerStyle)
+        setTimerStyle(settings.timerStyle)
+      }
+      if (settings.timerColor) {
+        console.log('[Display] Updating timerColor to:', settings.timerColor)
+        setTimerColor(settings.timerColor)
+      }
     })
 
     // Listen for poll display updates
     socket.on('poll:display', ({ poll }) => {
       setDisplayPoll(poll)
+    })
+
+    // Listen for featured question updates
+    socket.on('qa:featured', ({ question, position, size }) => {
+      setFeaturedQuestion(question)
+      // Update Q&A position/size if provided
+      if (position) setQaPosition(position)
+      if (size) setQaSize(size)
+    })
+
+    // Listen for timer display updates (now receives array of timers)
+    socket.on('timer:display', ({ timers }) => {
+      console.log('[Display] Received timer:display - timers:', timers?.length || 0)
+      setDisplayTimers(timers || [])
+      // Per-timer settings are now on each timer object, no global update needed
     })
 
     return () => {
@@ -130,6 +170,8 @@ function Display() {
       socket.off('reaction:display')
       socket.off('settings:sync')
       socket.off('poll:display')
+      socket.off('qa:featured')
+      socket.off('timer:display')
     }
   }, [displayId])
 
@@ -228,6 +270,155 @@ function Display() {
     return { backgroundColor: 'transparent' }
   }
 
+  // Get poll position styles based on A/V Tech setting
+  const getPollPositionStyle = (position) => {
+    const base = { position: 'absolute', zIndex: 500 }
+
+    switch (position) {
+      case 'center':
+        return { ...base, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
+      case 'lower-third':
+        return { ...base, bottom: '10%', left: '50%', transform: 'translateX(-50%)' }
+      case 'bottom-bar':
+        return { ...base, bottom: '3%', left: '50%', transform: 'translateX(-50%)', width: '75%' }
+      case 'top-right':
+        return { ...base, top: '5%', right: '5%' }
+      case 'top-left':
+        return { ...base, top: '5%', left: '5%' }
+      case 'bottom-right':
+        return { ...base, bottom: '5%', right: '5%' }
+      case 'bottom-left':
+        return { ...base, bottom: '5%', left: '5%' }
+      default:
+        return { ...base, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
+    }
+  }
+
+  // Get size multipliers for poll display
+  const getPollSizeMultiplier = (size) => {
+    switch (size) {
+      case 'small': return 0.75
+      case 'large': return 1.25
+      default: return 1 // medium
+    }
+  }
+
+  // Get Q&A position styles (matches poll positioning exactly)
+  const getQAPositionStyle = (position) => {
+    const base = { position: 'absolute', zIndex: 500 }
+
+    switch (position) {
+      case 'center':
+        return { ...base, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
+      case 'lower-third':
+        return { ...base, bottom: '10%', left: '50%', transform: 'translateX(-50%)' }
+      case 'bottom-bar':
+        return { ...base, bottom: '3%', left: '50%', transform: 'translateX(-50%)', width: '75%' }
+      case 'top-right':
+        return { ...base, top: '5%', right: '5%' }
+      case 'top-left':
+        return { ...base, top: '5%', left: '5%' }
+      case 'bottom-right':
+        return { ...base, bottom: '5%', right: '5%' }
+      case 'bottom-left':
+        return { ...base, bottom: '5%', left: '5%' }
+      default:
+        return { ...base, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
+    }
+  }
+
+  // Get Q&A size multiplier (matches poll sizing)
+  const getQASizeMultiplier = (size) => {
+    switch (size) {
+      case 'small': return 0.75
+      case 'large': return 1.25
+      default: return 1 // medium
+    }
+  }
+
+  // Get poll card styles based on position and size
+  const getPollCardStyle = (position, size) => {
+    const sizeMultiplier = getPollSizeMultiplier(size)
+
+    const baseStyle = {
+      background: 'rgba(15, 15, 26, 0.95)',
+      padding: `${Math.round(32 * sizeMultiplier)}px ${Math.round(40 * sizeMultiplier)}px`,
+      boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)',
+      backdropFilter: 'blur(20px)'
+    }
+
+    switch (position) {
+      case 'bottom-bar':
+        return {
+          ...baseStyle,
+          borderRadius: 16,
+          padding: `${Math.round(20 * sizeMultiplier)}px ${Math.round(40 * sizeMultiplier)}px`,
+          width: '100%',
+          maxWidth: 'none',
+          minWidth: 'auto',
+          maxHeight: 200 * sizeMultiplier,
+          overflow: 'hidden',
+          boxSizing: 'border-box'
+        }
+      case 'lower-third':
+        return {
+          ...baseStyle,
+          borderRadius: 24,
+          minWidth: Math.round(500 * sizeMultiplier),
+          maxWidth: Math.round(800 * sizeMultiplier)
+        }
+      case 'top-right':
+      case 'top-left':
+      case 'bottom-right':
+      case 'bottom-left':
+        return {
+          ...baseStyle,
+          borderRadius: 20,
+          minWidth: Math.round(350 * sizeMultiplier),
+          maxWidth: Math.round(450 * sizeMultiplier),
+          padding: `${Math.round(24 * sizeMultiplier)}px ${Math.round(32 * sizeMultiplier)}px`
+        }
+      default:
+        return {
+          ...baseStyle,
+          borderRadius: 24,
+          minWidth: Math.round(500 * sizeMultiplier),
+          maxWidth: Math.round(700 * sizeMultiplier)
+        }
+    }
+  }
+
+  // Get font sizes based on poll size
+  const getPollFontSizes = (size) => {
+    const sizeMultiplier = getPollSizeMultiplier(size)
+    return {
+      question: Math.round(28 * sizeMultiplier),
+      option: Math.round(18 * sizeMultiplier),
+      percentage: Math.round(20 * sizeMultiplier),
+      status: Math.round(14 * sizeMultiplier),
+      total: Math.round(14 * sizeMultiplier),
+      letterBox: Math.round(32 * sizeMultiplier),
+      letterFont: Math.round(16 * sizeMultiplier)
+    }
+  }
+
+  // Get animation name based on position
+  const getPollAnimation = (position) => {
+    switch (position) {
+      case 'bottom-bar':
+      case 'lower-third':
+        return 'pollSlideUpCentered' // These use translateX(-50%) for centering
+      case 'bottom-right':
+      case 'bottom-left':
+        return 'pollSlideUp' // Corner positions don't need centering transform
+      case 'top-right':
+      case 'top-left':
+        return 'pollSlideDown'
+      default:
+        return 'pollSlideIn'
+    }
+  }
+
   return (
     <div
       className={`display-page ${mode === 'transparent' ? 'display-transparent' : 'display-chroma'}`}
@@ -278,159 +469,554 @@ function Display() {
       )}
 
       {/* Poll overlay */}
-      {displayPoll && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          zIndex: 500,
-          animation: 'pollSlideIn 0.5s ease-out forwards'
-        }}>
+      {displayPoll && (() => {
+        const fontSizes = getPollFontSizes(pollSize)
+        const sizeMultiplier = getPollSizeMultiplier(pollSize)
+
+        return (
           <div style={{
-            background: 'rgba(15, 15, 26, 0.95)',
-            borderRadius: 24,
-            padding: '32px 40px',
-            minWidth: 500,
-            maxWidth: 700,
-            boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)',
-            backdropFilter: 'blur(20px)'
+            ...getPollPositionStyle(pollPosition),
+            animation: `${getPollAnimation(pollPosition)} 0.5s ease-out forwards`
           }}>
-            {/* Status indicator */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              marginBottom: 20
-            }}>
-              {displayPoll.status === 'live' && (
-                <>
-                  <span style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: '50%',
-                    background: '#22c55e',
-                    animation: 'pollPulse 1.5s infinite'
-                  }} />
-                  <span style={{ color: '#22c55e', fontSize: 14, fontWeight: 600 }}>
-                    VOTING OPEN
+            <div style={getPollCardStyle(pollPosition, pollSize)}>
+              {/* Status indicator */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                marginBottom: Math.round(20 * sizeMultiplier)
+              }}>
+                {displayPoll.status === 'live' && (
+                  <>
+                    <span style={{
+                      width: Math.round(10 * sizeMultiplier),
+                      height: Math.round(10 * sizeMultiplier),
+                      borderRadius: '50%',
+                      background: '#22c55e',
+                      animation: 'pollPulse 1.5s infinite'
+                    }} />
+                    <span style={{ color: '#22c55e', fontSize: fontSizes.status, fontWeight: 600 }}>
+                      VOTING OPEN
+                    </span>
+                  </>
+                )}
+                {displayPoll.status === 'closed' && (
+                  <span style={{ color: '#6b7280', fontSize: fontSizes.status, fontWeight: 600 }}>
+                    VOTING CLOSED
                   </span>
-                </>
-              )}
-              {displayPoll.status === 'closed' && (
-                <span style={{ color: '#6b7280', fontSize: 14, fontWeight: 600 }}>
-                  VOTING CLOSED
-                </span>
-              )}
-            </div>
+                )}
+              </div>
 
-            {/* Question */}
-            <h2 style={{
-              color: '#fff',
-              fontSize: 28,
-              fontWeight: 700,
-              textAlign: 'center',
-              margin: '0 0 24px 0',
-              lineHeight: 1.3
-            }}>
-              {displayPoll.question}
-            </h2>
+              {/* Question */}
+              <h2 style={{
+                color: '#fff',
+                fontSize: fontSizes.question,
+                fontWeight: 700,
+                textAlign: 'center',
+                margin: `0 0 ${Math.round(24 * sizeMultiplier)}px 0`,
+                lineHeight: 1.3
+              }}>
+                {displayPoll.question}
+              </h2>
 
-            {/* Options */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {displayPoll.options.map((option, index) => {
-                const votes = displayPoll.results?.voteCounts?.[option.id] || 0
-                const total = displayPoll.results?.totalVotes || 0
-                const percentage = total > 0 ? Math.round((votes / total) * 100) : 0
+              {/* Options */}
+              <div style={{ display: 'flex', flexDirection: pollPosition === 'bottom-bar' ? 'row' : 'column', gap: Math.round(12 * sizeMultiplier), flexWrap: 'wrap', justifyContent: 'center' }}>
+                {displayPoll.options.map((option, index) => {
+                  const votes = displayPoll.results?.voteCounts?.[option.id] || 0
+                  const total = displayPoll.results?.totalVotes || 0
+                  const percentage = total > 0 ? Math.round((votes / total) * 100) : 0
+                  const isCorrect = option.isCorrect && displayPoll.showResults
 
-                return (
-                  <div
-                    key={option.id}
-                    style={{
-                      position: 'relative',
-                      background: 'rgba(255,255,255,0.08)',
-                      borderRadius: 12,
-                      padding: '16px 20px',
-                      overflow: 'hidden',
-                      animation: `pollOptionFadeIn 0.4s ease-out ${index * 0.1}s both`
-                    }}
-                  >
-                    {/* Result bar (behind text) */}
-                    {displayPoll.showResults && (
+                  return (
+                    <div
+                      key={option.id}
+                      style={{
+                        position: 'relative',
+                        background: isCorrect ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255,255,255,0.08)',
+                        borderRadius: Math.round(12 * sizeMultiplier),
+                        padding: `${Math.round(16 * sizeMultiplier)}px ${Math.round(20 * sizeMultiplier)}px`,
+                        overflow: 'hidden',
+                        animation: `pollOptionFadeIn 0.4s ease-out ${index * 0.1}s both`,
+                        flex: pollPosition === 'bottom-bar' ? '1 1 auto' : 'none',
+                        minWidth: pollPosition === 'bottom-bar' ? 120 : 'auto',
+                        border: isCorrect ? '2px solid rgba(34, 197, 94, 0.5)' : 'none',
+                        boxSizing: 'border-box'
+                      }}
+                    >
+                      {/* Result bar (behind text) */}
+                      {displayPoll.showResults && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          bottom: 0,
+                          width: `${percentage}%`,
+                          background: isCorrect
+                            ? 'linear-gradient(90deg, rgba(34,197,94,0.4) 0%, rgba(34,197,94,0.2) 100%)'
+                            : 'linear-gradient(90deg, rgba(165,180,252,0.3) 0%, rgba(165,180,252,0.15) 100%)',
+                          borderRadius: Math.round(12 * sizeMultiplier),
+                          transition: 'width 0.8s ease-out',
+                          animation: 'pollBarGrow 0.8s ease-out'
+                        }} />
+                      )}
+
+                      {/* Content */}
                       <div style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        bottom: 0,
-                        width: `${percentage}%`,
-                        background: 'linear-gradient(90deg, rgba(165,180,252,0.3) 0%, rgba(165,180,252,0.15) 100%)',
-                        borderRadius: 12,
-                        transition: 'width 0.8s ease-out',
-                        animation: 'pollBarGrow 0.8s ease-out'
-                      }} />
-                    )}
-
-                    {/* Content */}
-                    <div style={{
-                      position: 'relative',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 14
-                    }}>
-                      <span style={{
-                        width: 32,
-                        height: 32,
+                        position: 'relative',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        background: 'rgba(165,180,252,0.2)',
-                        borderRadius: 8,
-                        fontSize: 16,
-                        fontWeight: 700,
-                        color: '#a5b4fc'
+                        gap: Math.round(14 * sizeMultiplier)
                       }}>
-                        {String.fromCharCode(65 + index)}
-                      </span>
-                      <span style={{
-                        flex: 1,
-                        fontSize: 18,
-                        color: '#fff',
-                        fontWeight: 500
-                      }}>
-                        {option.text}
-                      </span>
-                      {displayPoll.showResults && (
                         <span style={{
-                          fontSize: 20,
+                          width: fontSizes.letterBox,
+                          height: fontSizes.letterBox,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: isCorrect ? 'rgba(34,197,94,0.3)' : 'rgba(165,180,252,0.2)',
+                          borderRadius: Math.round(8 * sizeMultiplier),
+                          fontSize: fontSizes.letterFont,
                           fontWeight: 700,
-                          color: '#a5b4fc',
-                          minWidth: 60,
-                          textAlign: 'right'
+                          color: isCorrect ? '#22c55e' : '#a5b4fc',
+                          flexShrink: 0
                         }}>
-                          {percentage}%
+                          {String.fromCharCode(65 + index)}
                         </span>
-                      )}
+                        <span style={{
+                          flex: 1,
+                          fontSize: fontSizes.option,
+                          color: '#fff',
+                          fontWeight: 500
+                        }}>
+                          {option.text}
+                        </span>
+                        {isCorrect && (
+                          <span style={{
+                            color: '#22c55e',
+                            fontSize: fontSizes.percentage,
+                            fontWeight: 700
+                          }}>
+                            ✓
+                          </span>
+                        )}
+                        {displayPoll.showResults && (
+                          <span style={{
+                            fontSize: fontSizes.percentage,
+                            fontWeight: 700,
+                            color: isCorrect ? '#22c55e' : '#a5b4fc',
+                            minWidth: Math.round(60 * sizeMultiplier),
+                            textAlign: 'right'
+                          }}>
+                            {percentage}%
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Total votes */}
-            {displayPoll.showResults && (
-              <div style={{
-                textAlign: 'center',
-                marginTop: 20,
-                fontSize: 14,
-                color: 'rgba(255,255,255,0.5)'
-              }}>
-                {displayPoll.results?.totalVotes || 0} total votes
+                  )
+                })}
               </div>
-            )}
+
+              {/* Total votes */}
+              {displayPoll.showResults && (
+                <div style={{
+                  textAlign: 'center',
+                  marginTop: Math.round(20 * sizeMultiplier),
+                  fontSize: fontSizes.total,
+                  color: 'rgba(255,255,255,0.5)'
+                }}>
+                  {displayPoll.results?.totalVotes || 0} total votes
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
+
+      {/* Featured Q&A Question */}
+      {featuredQuestion && (() => {
+        const sizeMultiplier = getQASizeMultiplier(qaSize)
+
+        // Get animation based on position (to preserve correct transform)
+        const getQAAnimation = (pos) => {
+          switch (pos) {
+            case 'center':
+              return 'qaSlideInCenter 0.5s ease-out forwards'
+            case 'lower-third':
+            case 'bottom-bar':
+              return 'qaSlideUpCentered 0.5s ease-out forwards'
+            case 'bottom-right':
+            case 'bottom-left':
+              return 'qaSlideUp 0.5s ease-out forwards'
+            case 'top-right':
+            case 'top-left':
+              return 'qaSlideDown 0.5s ease-out forwards'
+            default:
+              return 'qaSlideInCenter 0.5s ease-out forwards'
+          }
+        }
+
+        return (
+          <div style={{
+            ...getQAPositionStyle(qaPosition),
+            animation: getQAAnimation(qaPosition)
+          }}>
+            <div style={{
+              background: 'rgba(15, 15, 26, 0.95)',
+              borderRadius: Math.round(20 * sizeMultiplier),
+              padding: `${Math.round(28 * sizeMultiplier)}px ${Math.round(40 * sizeMultiplier)}px`,
+              minWidth: Math.round(450 * sizeMultiplier),
+              maxWidth: Math.round(700 * sizeMultiplier),
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)',
+              backdropFilter: 'blur(20px)',
+              borderLeft: `4px solid #a5b4fc`
+            }}>
+              {/* Q&A indicator */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                marginBottom: Math.round(16 * sizeMultiplier)
+              }}>
+                <span style={{
+                  fontSize: Math.round(20 * sizeMultiplier)
+                }}>💬</span>
+                <span style={{
+                  color: '#a5b4fc',
+                  fontSize: Math.round(14 * sizeMultiplier),
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Audience Question
+                </span>
+              </div>
+
+              {/* Question text */}
+              <p style={{
+                color: '#fff',
+                fontSize: Math.round(26 * sizeMultiplier),
+                fontWeight: 500,
+                margin: 0,
+                lineHeight: 1.4
+              }}>
+                "{featuredQuestion.text}"
+              </p>
+
+              {/* Author */}
+              <p style={{
+                color: 'rgba(255,255,255,0.5)',
+                fontSize: Math.round(16 * sizeMultiplier),
+                margin: `${Math.round(16 * sizeMultiplier)}px 0 0 0`,
+                fontStyle: 'italic'
+              }}>
+                — {featuredQuestion.authorName}
+              </p>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Timer overlays (supports up to 3 simultaneous timers) */}
+      {displayTimers.map((timer, index) => {
+        // Use per-timer settings from timer object
+        const timerPosition = timer.position || 'center'
+        const timerSize = timer.size || 'medium'
+        const timerStyle = timer.style || 'digital'
+        const timerColor = timer.color || '#ffffff'
+        const displayText = timer.displayText || ''  // Optional custom text
+
+        // Calculate remaining/elapsed time
+        const elapsed = timer.currentElapsed || 0
+        const remaining = timer.type === 'countdown'
+          ? Math.max(0, timer.duration - elapsed)
+          : elapsed
+
+        const totalSeconds = Math.floor(remaining / 1000)
+        const hours = Math.floor(totalSeconds / 3600)
+        const minutes = Math.floor((totalSeconds % 3600) / 60)
+        const seconds = totalSeconds % 60
+
+        const timeString = hours > 0
+          ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+          : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+
+        // Get base position and apply offset for multiple timers
+        const basePositionStyle = getPollPositionStyle(timerPosition)
+        const sizeMultiplier = getPollSizeMultiplier(timerSize)
+
+        // Offset timers horizontally when multiple are showing at same position
+        const getOffsetPosition = (baseStyle, idx, total) => {
+          if (total <= 1) return baseStyle
+          const spacing = 320 * sizeMultiplier  // pixels between timers
+          const startOffset = -((total - 1) * spacing) / 2
+          const offset = startOffset + (idx * spacing)
+
+          // Only offset centered positions
+          if (baseStyle.left === '50%' && baseStyle.transform?.includes('translateX(-50%)')) {
+            return {
+              ...baseStyle,
+              transform: `translateX(calc(-50% + ${offset}px))`
+            }
+          }
+          return baseStyle
+        }
+
+        const positionStyle = getOffsetPosition(basePositionStyle, index, displayTimers.length)
+
+        // Check if countdown is almost done (last 10 seconds)
+        const isUrgent = timer.type === 'countdown' && remaining <= 10000 && remaining > 0
+        const isFinished = timer.type === 'countdown' && remaining === 0
+
+        // Get animation based on position (to preserve correct transform)
+        const getTimerAnimation = (pos) => {
+          switch (pos) {
+            case 'center':
+              return 'timerSlideInCenter 0.5s ease-out forwards'
+            case 'lower-third':
+            case 'bottom-bar':
+              return 'timerSlideUpCentered 0.5s ease-out forwards'
+            case 'bottom-right':
+            case 'bottom-left':
+              return 'timerSlideUp 0.5s ease-out forwards'
+            case 'top-right':
+            case 'top-left':
+              return 'timerSlideDown 0.5s ease-out forwards'
+            default:
+              return 'timerSlideInCenter 0.5s ease-out forwards'
+          }
+        }
+
+        // Get the display color (use urgent red if urgent/finished, otherwise use timerColor)
+        const displayColor = isFinished || isUrgent ? '#ef4444' : timerColor
+
+        // Calculate progress for circular style (0 to 1)
+        const progress = timer.type === 'countdown'
+          ? 1 - (remaining / timer.duration)
+          : Math.min(1, elapsed / (60 * 60 * 1000)) // For stopwatch, fill over 1 hour
+
+        // Render based on timerStyle
+        if (timerStyle === 'minimal') {
+          // Minimal style - just the time, no container
+          return (
+            <div key={timer.id} style={{
+              ...positionStyle,
+              animation: getTimerAnimation(timerPosition)
+            }}>
+              <div style={{
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  fontSize: Math.round(120 * sizeMultiplier),
+                  fontWeight: 700,
+                  color: displayColor,
+                  fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace",
+                  letterSpacing: '0.02em',
+                  lineHeight: 1,
+                  textShadow: '0 4px 20px rgba(0,0,0,0.8), 0 0 40px rgba(0,0,0,0.5)',
+                  animation: isUrgent && !isFinished ? 'pollPulse 1s infinite' : 'none'
+                }}>
+                  {timeString}
+                </div>
+                {displayText && (
+                  <div style={{
+                    marginTop: Math.round(12 * sizeMultiplier),
+                    fontSize: Math.round(24 * sizeMultiplier),
+                    color: 'rgba(255,255,255,0.7)',
+                    fontWeight: 500,
+                    textShadow: '0 2px 10px rgba(0,0,0,0.5)'
+                  }}>
+                    {displayText}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        }
+
+        if (timerStyle === 'circular') {
+          // Circular style - timer with progress ring
+          const circleSize = Math.round(280 * sizeMultiplier)
+          const strokeWidth = Math.round(12 * sizeMultiplier)
+          const radius = (circleSize - strokeWidth) / 2
+          const circumference = 2 * Math.PI * radius
+          const strokeDashoffset = circumference * (1 - progress)
+
+          return (
+            <div key={timer.id} style={{
+              ...positionStyle,
+              animation: getTimerAnimation(timerPosition)
+            }}>
+              <div style={{
+                position: 'relative',
+                width: circleSize,
+                height: circleSize
+              }}>
+                {/* Background circle */}
+                <svg
+                  width={circleSize}
+                  height={circleSize}
+                  style={{ position: 'absolute', top: 0, left: 0 }}
+                >
+                  <circle
+                    cx={circleSize / 2}
+                    cy={circleSize / 2}
+                    r={radius}
+                    fill="rgba(15, 15, 26, 0.95)"
+                    stroke="rgba(255,255,255,0.1)"
+                    strokeWidth={strokeWidth}
+                  />
+                  {/* Progress circle */}
+                  <circle
+                    cx={circleSize / 2}
+                    cy={circleSize / 2}
+                    r={radius}
+                    fill="none"
+                    stroke={displayColor}
+                    strokeWidth={strokeWidth}
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={strokeDashoffset}
+                    transform={`rotate(-90 ${circleSize / 2} ${circleSize / 2})`}
+                    style={{
+                      transition: 'stroke-dashoffset 0.1s linear',
+                      filter: `drop-shadow(0 0 10px ${displayColor}40)`
+                    }}
+                  />
+                </svg>
+                {/* Timer text in center */}
+                <div style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <div style={{
+                    fontSize: Math.round(56 * sizeMultiplier),
+                    fontWeight: 700,
+                    color: displayColor,
+                    fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace",
+                    letterSpacing: '0.02em',
+                    lineHeight: 1,
+                    animation: isUrgent && !isFinished ? 'pollPulse 1s infinite' : 'none'
+                  }}>
+                    {timeString}
+                  </div>
+                  {displayText && (
+                    <div style={{
+                      marginTop: Math.round(8 * sizeMultiplier),
+                      fontSize: Math.round(16 * sizeMultiplier),
+                      color: 'rgba(255,255,255,0.7)',
+                      fontWeight: 500,
+                      maxWidth: '80%',
+                      textAlign: 'center'
+                    }}>
+                      {displayText}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        }
+
+        // Default: Digital style (original)
+        return (
+          <div key={timer.id} style={{
+            ...positionStyle,
+            animation: getTimerAnimation(timerPosition)
+          }}>
+            <div style={{
+              background: 'rgba(15, 15, 26, 0.95)',
+              padding: `${Math.round(40 * sizeMultiplier)}px ${Math.round(60 * sizeMultiplier)}px`,
+              borderRadius: Math.round(24 * sizeMultiplier),
+              textAlign: 'center',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)',
+              backdropFilter: 'blur(20px)',
+              minWidth: Math.round(300 * sizeMultiplier)
+            }}>
+              {/* Timer status indicator */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                marginBottom: Math.round(16 * sizeMultiplier)
+              }}>
+                {timer.status === 'running' && !isFinished && (
+                  <>
+                    <span style={{
+                      width: Math.round(10 * sizeMultiplier),
+                      height: Math.round(10 * sizeMultiplier),
+                      borderRadius: '50%',
+                      background: isUrgent ? '#ef4444' : displayColor,
+                      animation: 'pollPulse 1.5s infinite'
+                    }} />
+                    <span style={{
+                      color: isUrgent ? '#ef4444' : displayColor,
+                      fontSize: Math.round(14 * sizeMultiplier),
+                      fontWeight: 600,
+                      letterSpacing: '0.05em'
+                    }}>
+                      {timer.type === 'countdown' ? 'COUNTDOWN' : 'STOPWATCH'}
+                    </span>
+                  </>
+                )}
+                {timer.status === 'paused' && (
+                  <span style={{
+                    color: '#f59e0b',
+                    fontSize: Math.round(14 * sizeMultiplier),
+                    fontWeight: 600,
+                    letterSpacing: '0.05em'
+                  }}>
+                    PAUSED
+                  </span>
+                )}
+                {isFinished && (
+                  <span style={{
+                    color: '#ef4444',
+                    fontSize: Math.round(14 * sizeMultiplier),
+                    fontWeight: 600,
+                    letterSpacing: '0.05em'
+                  }}>
+                    TIME'S UP!
+                  </span>
+                )}
+              </div>
+
+              {/* Timer display */}
+              <div style={{
+                fontSize: Math.round(96 * sizeMultiplier),
+                fontWeight: 700,
+                color: displayColor,
+                fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace",
+                letterSpacing: '0.05em',
+                lineHeight: 1,
+                animation: isUrgent && !isFinished ? 'pollPulse 1s infinite' : 'none'
+              }}>
+                {timeString}
+              </div>
+
+              {/* Timer custom text (optional) */}
+              {displayText && (
+                <div style={{
+                  marginTop: Math.round(16 * sizeMultiplier),
+                  fontSize: Math.round(20 * sizeMultiplier),
+                  color: 'rgba(255,255,255,0.7)',
+                  fontWeight: 500
+                }}>
+                  {displayText}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
 
       {/* Emoji layer */}
       {testEmojis.map(({ id, emoji, x, size, duration, isSurge, direction, particles, horizontalDrift }) => (
@@ -447,7 +1033,9 @@ function Display() {
             '--horizontal-drift': `${horizontalDrift}vw`
           }}
         >
-          {emoji}
+          {emoji.startsWith('data:') ? (
+            <img src={emoji} alt="" style={{ width: size, height: size, objectFit: 'contain' }} />
+          ) : emoji}
           {/* Particles for surge effect */}
           {isSurge && particles.map((particle) => (
             <div
@@ -563,6 +1151,36 @@ function Display() {
             transform: translate(-50%, -50%) scale(1);
           }
         }
+        @keyframes pollSlideUp {
+          0% {
+            opacity: 0;
+            transform: translateY(30px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes pollSlideUpCentered {
+          0% {
+            opacity: 0;
+            transform: translateX(-50%) translateY(30px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+          }
+        }
+        @keyframes pollSlideDown {
+          0% {
+            opacity: 0;
+            transform: translateY(-30px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
         @keyframes pollOptionFadeIn {
           0% {
             opacity: 0;
@@ -589,6 +1207,86 @@ function Display() {
           }
           50% {
             opacity: 0.5;
+          }
+        }
+        @keyframes qaSlideInCenter {
+          0% {
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.9);
+          }
+          100% {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+          }
+        }
+        @keyframes qaSlideUpCentered {
+          0% {
+            opacity: 0;
+            transform: translateX(-50%) translateY(30px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+          }
+        }
+        @keyframes qaSlideUp {
+          0% {
+            opacity: 0;
+            transform: translateY(30px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes qaSlideDown {
+          0% {
+            opacity: 0;
+            transform: translateY(-30px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes timerSlideInCenter {
+          0% {
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.9);
+          }
+          100% {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+          }
+        }
+        @keyframes timerSlideUpCentered {
+          0% {
+            opacity: 0;
+            transform: translateX(-50%) translateY(30px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+          }
+        }
+        @keyframes timerSlideUp {
+          0% {
+            opacity: 0;
+            transform: translateY(30px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes timerSlideDown {
+          0% {
+            opacity: 0;
+            transform: translateY(-30px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
           }
         }
       `}</style>

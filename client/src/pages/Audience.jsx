@@ -17,9 +17,17 @@ function Audience() {
   // Poll state
   const [activePoll, setActivePoll] = useState(null)
   const [selectedOption, setSelectedOption] = useState(null)
+  const [selectedOptions, setSelectedOptions] = useState(new Set())
   const [voteConfirmed, setVoteConfirmed] = useState(false)
   const [pollVisible, setPollVisible] = useState(false)
   const [pollClosing, setPollClosing] = useState(false)
+
+  // Q&A state
+  const [qaEnabled, setQaEnabled] = useState(false)
+  const [questionText, setQuestionText] = useState('')
+  const [authorName, setAuthorName] = useState('')
+  const [questionSubmitted, setQuestionSubmitted] = useState(false)
+  const [showQaForm, setShowQaForm] = useState(false)
 
   // Join event room on connect and when eventId changes
   useEffect(() => {
@@ -57,12 +65,20 @@ function Audience() {
       }
     })
 
+    // Listen for emoji list updates from server
+    socket.on('emoji:list', (emojiList) => {
+      if (emojiList && emojiList.length > 0) {
+        setEmojis(emojiList)
+      }
+    })
+
     socket.on('reaction:cooldown', () => {
       // Silently ignore - user doesn't see they're rate limited
     })
 
     return () => {
       socket.off('emoji:config')
+      socket.off('emoji:list')
       socket.off('reaction:cooldown')
     }
   }, [])
@@ -74,6 +90,7 @@ function Audience() {
       console.log('Received poll:active', poll)
       setActivePoll(poll)
       setSelectedOption(null)
+      setSelectedOptions(new Set())
       setVoteConfirmed(false)
       setPollClosing(false)
       // Trigger slide-in animation
@@ -100,11 +117,17 @@ function Audience() {
     }
 
     // Listen for vote confirmation - use functional update
-    const handleVoteConfirmed = ({ pollId, optionId }) => {
-      console.log('Received poll:vote-confirmed', pollId, optionId)
+    const handleVoteConfirmed = ({ pollId, optionId, optionIds }) => {
+      console.log('Received poll:vote-confirmed', pollId, optionId, optionIds)
       setActivePoll(currentPoll => {
         if (currentPoll?.id === pollId) {
-          setSelectedOption(optionId)
+          if (optionIds) {
+            // Multi-select confirmation
+            setSelectedOptions(new Set(optionIds))
+          } else {
+            // Single select confirmation
+            setSelectedOption(optionId)
+          }
           setVoteConfirmed(true)
         }
         return currentPoll
@@ -129,6 +152,40 @@ function Audience() {
     }
   }, [])
 
+  // Listen for Q&A events
+  useEffect(() => {
+    // Listen for Q&A state
+    socket.on('qa:state', ({ enabled }) => {
+      setQaEnabled(enabled)
+      // If Q&A was just disabled, hide the form
+      if (!enabled) {
+        setShowQaForm(false)
+      }
+    })
+
+    // Listen for question submitted confirmation
+    socket.on('qa:submitted', () => {
+      setQuestionSubmitted(true)
+      setQuestionText('')
+      // Reset after a few seconds
+      setTimeout(() => {
+        setQuestionSubmitted(false)
+      }, 3000)
+    })
+
+    // Listen for Q&A error
+    socket.on('qa:error', ({ message }) => {
+      console.log('Q&A error:', message)
+      alert(message)
+    })
+
+    return () => {
+      socket.off('qa:state')
+      socket.off('qa:submitted')
+      socket.off('qa:error')
+    }
+  }, [])
+
   const handleEmojiTap = (emoji) => {
     // Visual feedback
     setLastTap(emoji)
@@ -143,12 +200,45 @@ function Audience() {
   }
 
   const handleVote = (optionId) => {
-    if (voteConfirmed && !activePoll?.allowChange) return
+    if (activePoll?.allowMultiple) {
+      // Multi-select: toggle the option
+      const newSelections = new Set(selectedOptions)
+      if (newSelections.has(optionId)) {
+        newSelections.delete(optionId)
+      } else {
+        newSelections.add(optionId)
+      }
+      setSelectedOptions(newSelections)
 
-    socket.emit('poll:vote', {
+      // Send all selections to server
+      socket.emit('poll:vote', {
+        eventId: eventId || 'default',
+        pollId: activePoll.id,
+        optionIds: [...newSelections]
+      })
+    } else {
+      // Single select
+      if (voteConfirmed && !activePoll?.allowChange) return
+
+      setSelectedOption(optionId)
+      socket.emit('poll:vote', {
+        eventId: eventId || 'default',
+        pollId: activePoll.id,
+        optionId
+      })
+    }
+  }
+
+  const handleSubmitQuestion = () => {
+    const text = questionText.trim()
+    if (!text) {
+      return
+    }
+
+    socket.emit('qa:submit', {
       eventId: eventId || 'default',
-      pollId: activePoll.id,
-      optionId
+      text,
+      authorName: authorName.trim() || 'Anonymous'
     })
   }
 
@@ -169,27 +259,43 @@ function Audience() {
           <div className="poll-card">
             <h2 className="poll-question">{activePoll.question}</h2>
 
+            {activePoll.allowMultiple && (
+              <p className="poll-multi-hint">Select all that apply</p>
+            )}
+
             <div className="poll-options">
-              {activePoll.options.map((option, index) => (
-                <button
-                  key={option.id}
-                  className={`poll-option ${selectedOption === option.id ? 'poll-option--selected' : ''}`}
-                  onClick={() => handleVote(option.id)}
-                  disabled={voteConfirmed && !activePoll.allowChange}
-                >
-                  <span className="poll-option-letter">{String.fromCharCode(65 + index)}</span>
-                  <span className="poll-option-text">{option.text}</span>
-                  {selectedOption === option.id && (
-                    <span className="poll-option-check">✓</span>
-                  )}
-                </button>
-              ))}
+              {activePoll.options.map((option, index) => {
+                const isSelected = activePoll.allowMultiple
+                  ? selectedOptions.has(option.id)
+                  : selectedOption === option.id
+
+                return (
+                  <button
+                    key={option.id}
+                    className={`poll-option ${isSelected ? 'poll-option--selected' : ''}`}
+                    onClick={() => handleVote(option.id)}
+                    disabled={!activePoll.allowMultiple && voteConfirmed && !activePoll.allowChange}
+                  >
+                    <span className="poll-option-letter">{String.fromCharCode(65 + index)}</span>
+                    <span className="poll-option-text">{option.text}</span>
+                    {isSelected && (
+                      <span className="poll-option-check">✓</span>
+                    )}
+                  </button>
+                )
+              })}
             </div>
 
-            {voteConfirmed && (
+            {voteConfirmed && !activePoll.allowMultiple && (
               <div className="poll-confirmed">
                 Vote submitted!
                 {activePoll.allowChange && <span className="poll-change-hint">Tap another option to change</span>}
+              </div>
+            )}
+
+            {activePoll.allowMultiple && selectedOptions.size > 0 && (
+              <div className="poll-confirmed">
+                {selectedOptions.size} option{selectedOptions.size !== 1 ? 's' : ''} selected
               </div>
             )}
           </div>
@@ -205,11 +311,75 @@ function Audience() {
               className={`emoji-button ${lastTap === emoji ? 'emoji-button--active' : ''}`}
               onClick={() => handleEmojiTap(emoji)}
             >
-              <span className="emoji-icon">{emoji}</span>
+              {emoji.startsWith('data:') ? (
+                <img src={emoji} alt="custom emoji" className="emoji-icon emoji-img" />
+              ) : (
+                <span className="emoji-icon">{emoji}</span>
+              )}
             </button>
           ))}
         </div>
       </main>
+
+      {/* Q&A Section */}
+      {qaEnabled && (
+        <div className="qa-section">
+          {!showQaForm ? (
+            <button
+              className="qa-open-btn"
+              onClick={() => setShowQaForm(true)}
+            >
+              <span className="qa-open-icon">💬</span>
+              Ask a Question
+            </button>
+          ) : (
+            <div className="qa-form-container">
+              <div className="qa-form-header">
+                <h3 className="qa-form-title">Ask a Question</h3>
+                <button
+                  className="qa-close-btn"
+                  onClick={() => setShowQaForm(false)}
+                >
+                  ×
+                </button>
+              </div>
+
+              {questionSubmitted ? (
+                <div className="qa-submitted-message">
+                  <span className="qa-submitted-icon">✓</span>
+                  Question submitted! It will appear after moderation.
+                </div>
+              ) : (
+                <>
+                  <textarea
+                    className="qa-textarea"
+                    placeholder="Type your question here..."
+                    value={questionText}
+                    onChange={(e) => setQuestionText(e.target.value)}
+                    rows={3}
+                    maxLength={500}
+                  />
+                  <input
+                    type="text"
+                    className="qa-name-input"
+                    placeholder="Your name (optional)"
+                    value={authorName}
+                    onChange={(e) => setAuthorName(e.target.value)}
+                    maxLength={50}
+                  />
+                  <button
+                    className="qa-submit-btn"
+                    onClick={handleSubmitQuestion}
+                    disabled={!questionText.trim()}
+                  >
+                    Submit Question
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="audience-footer">

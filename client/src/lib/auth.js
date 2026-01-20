@@ -1,5 +1,14 @@
 import { supabase } from './supabase'
 
+// Sign in with email and password
+export async function signInWithPassword(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password
+  })
+  return { data, error }
+}
+
 // Sign in with magic link (email)
 export async function signInWithMagicLink(email) {
   const { data, error } = await supabase.auth.signInWithOtp({
